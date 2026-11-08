@@ -1,0 +1,13 @@
+{
+  "name": "researchforge-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ResearchForge monorepo root convenience scripts",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "npm run build --prefix client",
+    "test": "node -e \"console.error('Error: Test infrastructure (Jest / Vitest) is not yet configured for Phase 1. See PROJECT_STATE.md §7 for Phase 6 / Phase 4 testing tasks.'); process.exit(1);\""
+  }
+}
+
