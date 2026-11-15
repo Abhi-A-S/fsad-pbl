@@ -13,5 +13,5 @@ export const config = {
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '5000', 10),
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  mongodbUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/researchforge',
 };
-
