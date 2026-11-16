@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink, Link, useLocation } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   BookOpen, 
   LayoutDashboard, 
@@ -8,13 +8,63 @@ import {
   Search, 
   Sparkles,
   Library,
-  GraduationCap
+  GraduationCap,
+  LogOut,
+  Loader2
 } from 'lucide-react';
 import { useLibrary } from '../context/LibraryContext.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
+
+/**
+ * Extracts 1-2 uppercase avatar initials from display name or email.
+ */
+function getInitials(displayName, email) {
+  if (displayName && typeof displayName === 'string' && displayName.trim()) {
+    const clean = displayName.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    if (parts.length > 1) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+  }
+  if (email && typeof email === 'string' && email.trim()) {
+    return email.trim().slice(0, 2).toUpperCase();
+  }
+  return 'RF';
+}
 
 export default function AppLayout({ children }) {
   const { papers, collections } = useLibrary();
+  const { user, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState(null);
+
+  const displayName = user?.displayName?.trim() || user?.email?.split('@')[0] || 'Researcher';
+  const email = user?.email || 'No email attached';
+  const initials = getInitials(user?.displayName, user?.email);
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    setLogoutError(null);
+
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } catch (err) {
+      // AuthContext's logout() wipes local user state in `finally`,
+      // guaranteeing local auth state is already null even on network failure.
+      setLogoutError(err.message || 'Logout encountered a server issue.');
+      navigate('/login', { replace: true });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   const navItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -109,6 +159,52 @@ export default function AppLayout({ children }) {
               })}
             </div>
           </div>
+        </div>
+
+        {/* User Profile & Sign Out */}
+        <div className="p-3 border-t border-stone-200/90 bg-white/70">
+          <div className="flex items-center gap-2.5">
+            {/* Initials Avatar */}
+            <div
+              className="h-8 w-8 rounded-full bg-stone-900 text-stone-100 flex items-center justify-center font-serif text-xs font-semibold shrink-0 shadow-2xs select-none"
+              aria-label={`Avatar for ${displayName}`}
+              title={displayName}
+            >
+              {initials}
+            </div>
+
+            {/* User Meta */}
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold text-stone-900 truncate leading-tight">
+                {displayName}
+              </div>
+              <div className="text-[11px] font-mono text-stone-500 truncate leading-tight mt-0.5" title={email}>
+                {email}
+              </div>
+            </div>
+
+            {/* Logout Action */}
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              title="Sign out"
+              aria-label="Sign out"
+              className="p-1.5 text-stone-400 hover:text-stone-800 hover:bg-stone-200/70 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              {isLoggingOut ? (
+                <Loader2 className="h-4 w-4 animate-spin text-stone-600" />
+              ) : (
+                <LogOut className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+
+          {logoutError && (
+            <div className="mt-2 p-1.5 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded text-center">
+              {logoutError}
+            </div>
+          )}
         </div>
 
         {/* Mock Mode Indicator in Sidebar Footer */}
