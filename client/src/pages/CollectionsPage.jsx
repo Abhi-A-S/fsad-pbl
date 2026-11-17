@@ -133,7 +133,9 @@ export default function CollectionsPage() {
                       >
                         {p.title}
                       </Link>
-                      <p className="text-xs text-stone-500">{p.authors.join(', ')} ({p.year})</p>
+                      <p className="text-xs text-stone-500">
+                        {Array.isArray(p.authors) ? p.authors.join(', ') : p.authors} ({p.year || 'N/D'})
+                      </p>
                     </div>
                     <Link
                       to={`/library/${p.id}`}

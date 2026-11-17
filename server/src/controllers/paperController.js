@@ -464,6 +464,42 @@ export async function searchPapers(req, res, next) {
       });
     }
 
+    let page = 1;
+    let limit = 10;
+
+    // Validate page parameter if provided
+    if (req.query.page !== undefined) {
+      const parsedPage = Number(req.query.page);
+      if (!Number.isInteger(parsedPage) || parsedPage < 1) {
+        return res.status(400).json({
+          error: {
+            message: 'Page parameter must be a positive integer greater than or equal to 1',
+          },
+        });
+      }
+      page = parsedPage;
+    }
+
+    // Validate limit parameter if provided
+    if (req.query.limit !== undefined) {
+      const parsedLimit = Number(req.query.limit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 1) {
+        return res.status(400).json({
+          error: {
+            message: 'Limit parameter must be a positive integer greater than or equal to 1',
+          },
+        });
+      }
+      if (parsedLimit > 50) {
+        return res.status(400).json({
+          error: {
+            message: 'Limit parameter cannot exceed 50 items per page',
+          },
+        });
+      }
+      limit = parsedLimit;
+    }
+
     // Normalize potential DOI input (strip URL prefixes and leading "doi:" prefix)
     const cleanedDoi = trimmedQuery
       .toLowerCase()
@@ -471,46 +507,90 @@ export async function searchPapers(req, res, next) {
       .replace(/^doi:\s*/i, '')
       .trim();
 
-    // Query text search and DOI match concurrently
-    const [textResults, doiResults] = await Promise.all([
-      Paper.find(
-        {
+    const hasDoiQuery = cleanedDoi.length > 0;
+    const doiRegex = hasDoiQuery ? new RegExp(escapeRegex(cleanedDoi), 'i') : null;
+
+    const doiFilter = hasDoiQuery
+      ? {
           owner: req.user._id,
-          $text: { $search: trimmedQuery },
-        },
-        { score: { $meta: 'textScore' } }
-      ).sort({ score: { $meta: 'textScore' }, createdAt: -1 }),
-      cleanedDoi.length > 0
-        ? Paper.find({
-            owner: req.user._id,
-            doi: { $regex: escapeRegex(cleanedDoi), $options: 'i' },
-          }).sort({ createdAt: -1 })
-        : Promise.resolve([]),
-    ]);
+          doi: doiRegex,
+        }
+      : null;
 
-    // Merge and deduplicate results, prioritizing direct DOI matches for identifier queries
-    // followed by text relevance matches
-    const seenIds = new Set();
-    const papers = [];
+    const textFilter = {
+      owner: req.user._id,
+      $text: { $search: trimmedQuery },
+    };
 
-    for (const paper of doiResults) {
-      const idStr = paper._id.toString();
-      if (!seenIds.has(idStr)) {
-        seenIds.add(idStr);
-        papers.push(paper);
-      }
+    // Exclude papers that match the DOI filter from text search results to prevent
+    // duplicate documents across streams and ensure accurate disjoint counts.
+    if (hasDoiQuery) {
+      textFilter.doi = { $not: doiRegex };
     }
 
-    for (const paper of textResults) {
-      const idStr = paper._id.toString();
-      if (!seenIds.has(idStr)) {
-        seenIds.add(idStr);
-        papers.push(paper);
+    // Step 1: Count matching documents in each prioritized stream
+    const [doiCount, textCount] = await Promise.all([
+      hasDoiQuery ? Paper.countDocuments(doiFilter) : 0,
+      Paper.countDocuments(textFilter),
+    ]);
+
+    const total = doiCount + textCount;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+    const skip = (page - 1) * limit;
+
+    let paginatedPapers = [];
+
+    if (total > 0 && skip < total) {
+      // Step 2: Compute database-level slice limits for each stream
+      let doiSkip = 0;
+      let doiTake = 0;
+      let textSkip = 0;
+      let textTake = 0;
+
+      if (skip < doiCount) {
+        // Page begins in the DOI matches stream
+        doiSkip = skip;
+        doiTake = Math.min(limit, doiCount - skip);
+        textSkip = 0;
+        textTake = limit - doiTake;
+      } else {
+        // Page falls entirely within the text matches stream
+        doiSkip = 0;
+        doiTake = 0;
+        textSkip = skip - doiCount;
+        textTake = limit;
       }
+
+      // Step 3: Fetch at most `limit` documents directly from MongoDB using skip and limit
+      const [doiDocs, textDocs] = await Promise.all([
+        doiTake > 0
+          ? Paper.find(doiFilter)
+              .sort({ createdAt: -1, _id: -1 })
+              .skip(doiSkip)
+              .limit(doiTake)
+          : Promise.resolve([]),
+        textTake > 0
+          ? Paper.find(
+              textFilter,
+              { score: { $meta: 'textScore' } }
+            )
+              .sort({ score: { $meta: 'textScore' }, createdAt: -1, _id: -1 })
+              .skip(textSkip)
+              .limit(textTake)
+          : Promise.resolve([]),
+      ]);
+
+      paginatedPapers = [...doiDocs, ...textDocs];
     }
 
     return res.status(200).json({
-      papers,
+      papers: paginatedPapers,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
     });
   } catch (error) {
     next(error);

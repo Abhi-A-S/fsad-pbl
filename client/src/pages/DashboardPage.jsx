@@ -109,41 +109,54 @@ export default function DashboardPage() {
         </div>
 
         <div className="space-y-3">
-          {recentPapers.map((paper) => (
-            <div
-              key={paper.id}
-              className="p-4 bg-white rounded-lg border border-stone-200 hover:border-stone-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3"
-            >
-              <div className="max-w-2xl">
-                <Link
-                  to={`/library/${paper.id}`}
-                  className="font-serif text-base font-semibold text-stone-900 hover:underline leading-snug block"
-                >
-                  {paper.title}
-                </Link>
-                <p className="text-xs text-stone-500 mt-1">
-                  {paper.authors.join(', ')} • <span className="font-mono">{paper.year}</span>
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {paper.tags?.slice(0, 2).map((t) => (
-                  <span
-                    key={t}
-                    className="px-2 py-0.5 bg-stone-100 text-stone-600 rounded text-[11px] font-mono"
-                  >
-                    #{t}
-                  </span>
-                ))}
-                <Link
-                  to={`/library/${paper.id}`}
-                  className="text-xs text-stone-700 hover:text-stone-950 font-medium ml-2"
-                >
-                  Details →
-                </Link>
-              </div>
+          {recentPapers.length === 0 ? (
+            <div className="p-8 text-center bg-white rounded-lg border border-dashed border-stone-200">
+              <p className="text-xs text-stone-500">No publications cataloged yet.</p>
+              <Link
+                to="/import"
+                className="mt-2 inline-flex items-center gap-1 text-xs text-stone-800 hover:text-stone-950 font-medium underline"
+              >
+                Import your first paper
+              </Link>
             </div>
-          ))}
+          ) : (
+            recentPapers.map((paper) => (
+              <div
+                key={paper.id}
+                className="p-4 bg-white rounded-lg border border-stone-200 hover:border-stone-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3"
+              >
+                <div className="max-w-2xl">
+                  <Link
+                    to={`/library/${paper.id}`}
+                    className="font-serif text-base font-semibold text-stone-900 hover:underline leading-snug block"
+                  >
+                    {paper.title}
+                  </Link>
+                  <p className="text-xs text-stone-500 mt-1">
+                    {Array.isArray(paper.authors) ? paper.authors.join(', ') : paper.authors} •{' '}
+                    <span className="font-mono">{paper.year || 'N/D'}</span>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {paper.tags?.slice(0, 2).map((t) => (
+                    <span
+                      key={t}
+                      className="px-2 py-0.5 bg-stone-100 text-stone-600 rounded text-[11px] font-mono"
+                    >
+                      #{t}
+                    </span>
+                  ))}
+                  <Link
+                    to={`/library/${paper.id}`}
+                    className="text-xs text-stone-700 hover:text-stone-950 font-medium ml-2"
+                  >
+                    Details →
+                  </Link>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

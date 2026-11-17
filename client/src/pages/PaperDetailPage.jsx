@@ -1,24 +1,134 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, Calendar, BookOpen, FolderPlus, Tag, Check, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ExternalLink,
+  BookOpen,
+  FolderPlus,
+  Check,
+  X,
+  Loader2,
+  AlertCircle,
+  Trash2,
+} from 'lucide-react';
 import { useLibrary } from '../context/LibraryContext.jsx';
+import { paperApi } from '../services/paperApi.js';
 
 export default function PaperDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { papers, collections, addPaperToCollection, removePaperFromCollection } = useLibrary();
+  const {
+    collections,
+    addPaperToCollection,
+    removePaperFromCollection,
+    deletePaper,
+  } = useLibrary();
 
-  const paper = papers.find((p) => p.id === id);
+  const [paper, setPaper] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isNotFound, setIsNotFound] = useState(false);
+
+  // Delete modal / state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  // Collection modal state
   const [showCollectionModal, setShowCollectionModal] = useState(false);
 
-  if (!paper) {
+  // Fetch paper details directly from MongoDB backend (GET /api/papers/:id)
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchPaperDetails() {
+      if (!id) return;
+      setLoading(true);
+      setError(null);
+      setIsNotFound(false);
+
+      try {
+        const result = await paperApi.getPaper(id);
+        if (isMounted) {
+          setPaper(result.paper);
+        }
+      } catch (err) {
+        if (isMounted) {
+          if (err.status === 404) {
+            setIsNotFound(true);
+          } else {
+            setError(err.message || 'Failed to load publication record.');
+          }
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchPaperDetails();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
+
+  // Handle Paper Deletion (DELETE /api/papers/:id)
+  const handleDeletePaper = async () => {
+    if (!paper?.id || isDeleting) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      await deletePaper(paper.id);
+      navigate('/library', { replace: true });
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete publication from library.');
+      setIsDeleting(false);
+    }
+  };
+
+  if (loading) {
     return (
-      <div className="p-12 text-center bg-white rounded-lg border border-stone-200">
+      <div className="p-16 text-center bg-white rounded-xl border border-stone-200">
+        <Loader2 className="h-7 w-7 text-stone-400 animate-spin mx-auto mb-3" />
+        <h2 className="font-serif text-lg font-semibold text-stone-800">
+          Loading Publication Record
+        </h2>
+        <p className="text-xs text-stone-400 mt-1">Retrieving metadata from MongoDB...</p>
+      </div>
+    );
+  }
+
+  if (isNotFound) {
+    return (
+      <div className="p-12 text-center bg-white rounded-lg border border-stone-200 max-w-lg mx-auto">
+        <BookOpen className="h-8 w-8 text-stone-300 mx-auto mb-3" />
         <h2 className="font-serif text-xl font-semibold text-stone-800">Publication Not Found</h2>
-        <p className="text-sm text-stone-500 mt-2">The requested paper record does not exist in local state.</p>
+        <p className="text-sm text-stone-500 mt-2">
+          The requested paper record does not exist in your library or was deleted.
+        </p>
         <button
           onClick={() => navigate('/library')}
-          className="mt-4 px-4 py-2 bg-stone-900 text-stone-100 rounded-md text-xs font-medium"
+          className="mt-4 px-4 py-2 bg-stone-900 text-stone-100 rounded-md text-xs font-medium hover:bg-stone-800 transition-colors"
+        >
+          Return to Library
+        </button>
+      </div>
+    );
+  }
+
+  if (error || !paper) {
+    return (
+      <div className="p-8 text-center bg-white rounded-lg border border-red-200 max-w-lg mx-auto">
+        <AlertCircle className="h-6 w-6 text-red-500 mx-auto mb-2" />
+        <h2 className="font-serif text-lg font-semibold text-stone-800">Error Loading Publication</h2>
+        <p className="text-xs text-red-600 mt-1">{error || 'An unexpected error occurred.'}</p>
+        <button
+          onClick={() => navigate('/library')}
+          className="mt-4 px-4 py-2 bg-stone-900 text-stone-100 rounded-md text-xs font-medium hover:bg-stone-800 transition-colors"
         >
           Return to Library
         </button>
@@ -56,6 +166,11 @@ export default function PaperDetailPage() {
                 DOI: {paper.doi}
               </span>
             )}
+            {paper.publicationDate && (
+              <span className="font-mono text-xs text-stone-400">
+                Published: {new Date(paper.publicationDate).toLocaleDateString()}
+              </span>
+            )}
           </div>
 
           <h1 className="font-serif text-2xl md:text-3xl font-semibold text-stone-950 leading-tight">
@@ -63,14 +178,21 @@ export default function PaperDetailPage() {
           </h1>
 
           <div className="text-sm font-medium text-stone-700">
-            {paper.authors.join(', ')}
+            {Array.isArray(paper.authors) ? paper.authors.join(', ') : paper.authors}
           </div>
 
-          {paper.venue && (
-            <div className="text-xs text-stone-500 italic">
-              Published in: {paper.venue}
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500">
+            {paper.venue && (
+              <span className="italic">
+                Published in: {paper.venue}
+              </span>
+            )}
+            {paper.publisher && (
+              <span>
+                Publisher: {paper.publisher}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Abstract */}
@@ -79,7 +201,7 @@ export default function PaperDetailPage() {
             Abstract
           </h2>
           <p className="text-sm text-stone-800 font-serif leading-relaxed text-justify bg-stone-50/70 p-5 rounded-lg border border-stone-200/50">
-            {paper.abstract || "No abstract recorded for this publication."}
+            {paper.abstract || 'No abstract recorded for this publication.'}
           </p>
         </div>
 
@@ -141,23 +263,91 @@ export default function PaperDetailPage() {
         </div>
 
         {/* Actions & Links */}
-        <div className="pt-6 border-t border-stone-200/80 flex items-center justify-between">
+        <div className="pt-6 border-t border-stone-200/80 flex flex-wrap items-center justify-between gap-4">
           <div className="text-xs font-mono text-stone-400">
-            Recorded in local mock state: {new Date(paper.addedAt).toLocaleDateString()}
+            Recorded in MongoDB: {new Date(paper.createdAt || paper.addedAt || Date.now()).toLocaleDateString()}
           </div>
-          {paper.url && (
-            <a
-              href={paper.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-stone-900 text-stone-100 rounded-md text-xs font-medium hover:bg-stone-800 transition-colors"
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-stone-600 hover:text-red-700 border border-stone-200 hover:border-red-200 hover:bg-red-50/50 rounded-md text-xs font-medium transition-colors"
             >
-              <span>View Original Source</span>
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          )}
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Delete Paper</span>
+            </button>
+
+            {paper.url && (
+              <a
+                href={paper.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-stone-900 text-stone-100 rounded-md text-xs font-medium hover:bg-stone-800 transition-colors"
+              >
+                <span>View Original Source</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+          </div>
         </div>
       </article>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-stone-200 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-serif text-lg font-semibold text-stone-900">
+                Delete Publication
+              </h3>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="text-stone-400 hover:text-stone-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Are you sure you want to delete <strong className="font-medium text-stone-900">"{paper.title}"</strong> from your library? This will permanently remove the record from MongoDB.
+            </p>
+
+            {deleteError && (
+              <div className="p-2.5 bg-red-50 text-red-700 rounded-md text-xs flex items-center gap-2 border border-red-200">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-100">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="px-3 py-1.5 border border-stone-200 bg-white hover:bg-stone-50 rounded-md text-xs font-medium text-stone-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeletePaper}
+                disabled={isDeleting}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-medium transition-colors disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Collection Modal */}
       {showCollectionModal && (
@@ -224,4 +414,3 @@ export default function PaperDetailPage() {
     </div>
   );
 }
-
