@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import { config } from './config/env.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
+import paperRoutes from './routes/papers.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -29,6 +30,7 @@ app.use(cookieParser());
 // API routes
 app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/papers', paperRoutes);
 
 // Centralized error handler
 app.use(errorHandler);

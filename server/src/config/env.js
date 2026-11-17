@@ -17,4 +17,5 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'dev-fallback-secret-never-use-in-production-0123456789abcdef',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1d',
   cookieName: process.env.AUTH_COOKIE_NAME || 'rf_token',
+  crossrefMailto: process.env.CROSSREF_MAILTO || '',
 };
