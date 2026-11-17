@@ -6,6 +6,7 @@ import { config } from './config/env.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import paperRoutes from './routes/papers.js';
+import collectionRoutes from './routes/collections.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -31,6 +32,7 @@ app.use(cookieParser());
 app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/papers', paperRoutes);
+app.use('/api/collections', collectionRoutes);
 
 // Centralized error handler
 app.use(errorHandler);

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { fetchCrossrefMetadata, CrossrefError } from '../services/crossrefService.js';
 import { Paper } from '../models/Paper.js';
+import { Collection } from '../models/Collection.js';
 
 /**
  * Controller to look up paper metadata from Crossref by DOI.
@@ -388,7 +389,8 @@ export async function deletePaper(req, res, next) {
       });
     }
 
-    const paper = await Paper.findOneAndDelete({
+    // 1. Verify paper exists and belongs to the authenticated user
+    const paper = await Paper.findOne({
       _id: id,
       owner: req.user._id,
     });
@@ -400,6 +402,24 @@ export async function deletePaper(req, res, next) {
         },
       });
     }
+
+    // 2. Clean up collection references before deleting the paper.
+    // This ensures that if collection cleanup fails, we do not leave orphaned references
+    // and the operation can be retried because the paper is not prematurely removed.
+    const cleanupResult = await Collection.updateMany(
+      { owner: req.user._id, papers: id },
+      { $pull: { papers: id } }
+    );
+
+    if (cleanupResult && cleanupResult.acknowledged === false) {
+      throw new Error('Collection cleanup was unacknowledged by the database');
+    }
+
+    // 3. Delete the paper document
+    await Paper.deleteOne({
+      _id: id,
+      owner: req.user._id,
+    });
 
     return res.status(200).json({
       message: 'Paper deleted successfully',
