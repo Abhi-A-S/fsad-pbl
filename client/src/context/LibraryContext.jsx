@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { initialCollections } from '../data/mockData.js';
 import { paperApi, PaperApiError } from '../services/paperApi.js';
+import { collectionApi, CollectionApiError } from '../services/collectionApi.js';
 import { useAuth } from './AuthContext.jsx';
 
 const LibraryContext = createContext();
@@ -19,23 +19,18 @@ export function LibraryProvider({ children }) {
     totalPages: 0,
   });
 
-  // Collections state (mock/localStorage-backed until Phase 5B Batch 2)
-  const [collections, setCollections] = useState(() => {
-    const saved = localStorage.getItem('rf_mock_collections');
-    return saved ? JSON.parse(saved) : initialCollections;
-  });
+  // Collections state (sourced exclusively from MongoDB backend)
+  const [collections, setCollections] = useState([]);
+  const [collectionsLoading, setCollectionsLoading] = useState(false);
+  const [collectionsError, setCollectionsError] = useState(null);
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Clean up any legacy localStorage papers from Phase 1 mock
+  // Clean up any legacy localStorage mock datasets
   useEffect(() => {
     localStorage.removeItem('rf_mock_papers');
+    localStorage.removeItem('rf_mock_collections');
   }, []);
-
-  // Sync collections to localStorage until Phase 5B Batch 2
-  useEffect(() => {
-    localStorage.setItem('rf_mock_collections', JSON.stringify(collections));
-  }, [collections]);
 
   /**
    * Fetches papers from the backend for the authenticated user.
@@ -85,16 +80,47 @@ export function LibraryProvider({ children }) {
     [user]
   );
 
-  // Automatically fetch papers when user logs in; clear when user logs out
+  /**
+   * Fetches collections from the backend for the authenticated user.
+   */
+  const fetchCollections = useCallback(async () => {
+    if (!user) {
+      setCollections([]);
+      setCollectionsError(null);
+      return [];
+    }
+
+    setCollectionsLoading(true);
+    setCollectionsError(null);
+
+    try {
+      const result = await collectionApi.getCollections();
+      const loaded = result.collections || [];
+      setCollections(loaded);
+      return loaded;
+    } catch (err) {
+      const message = err.message || 'Failed to load research collections';
+      setCollectionsError(message);
+      throw err;
+    } finally {
+      setCollectionsLoading(false);
+    }
+  }, [user]);
+
+  // Automatically fetch papers and collections on login; clear on logout
   useEffect(() => {
     if (user) {
       fetchPapers({ page: 1, limit: 10 });
+      fetchCollections();
     } else {
       setPapers([]);
       setPagination({ page: 1, limit: 10, total: 0, totalPages: 0 });
       setPapersError(null);
+      setCollections([]);
+      setCollectionsError(null);
+      setCollectionsLoading(false);
     }
-  }, [user, fetchPapers]);
+  }, [user, fetchPapers, fetchCollections]);
 
   /**
    * Look up publication metadata from Crossref by DOI.
@@ -155,16 +181,29 @@ export function LibraryProvider({ children }) {
 
   /**
    * Deletes a paper from MongoDB via DELETE /api/papers/:id.
+   * Also cleans up any references in loaded collections for immediate consistency.
    */
   const deletePaper = useCallback(async (id) => {
     const result = await paperApi.deletePaper(id);
 
+    // Remove deleted paper from papers list
     setPapers((prev) => prev.filter((p) => p.id !== id));
     setPagination((prev) => ({
       ...prev,
       total: Math.max(0, prev.total - 1),
       totalPages: Math.ceil(Math.max(0, prev.total - 1) / (prev.limit || 10)),
     }));
+
+    // Cascade remove paper reference from loaded collections in memory
+    setCollections((prev) =>
+      prev.map((col) => ({
+        ...col,
+        papers: (col.papers || []).filter((p) => {
+          const pId = typeof p === 'string' ? p : p.id || p._id;
+          return pId !== id;
+        }),
+      }))
+    );
 
     return result;
   }, []);
@@ -181,46 +220,43 @@ export function LibraryProvider({ children }) {
     [papers]
   );
 
-  // --- Collection management (mock/localStorage until Phase 5B Batch 2) ---
-  const createCollection = (name, description, color = 'stone') => {
-    const newCol = {
-      id: `col-${Date.now()}`,
-      name,
-      description: description || 'No description provided.',
-      createdAt: new Date().toISOString(),
-      color,
-    };
+  /**
+   * Creates a new collection via POST /api/collections.
+   */
+  const createCollection = useCallback(async (name, description = '') => {
+    const result = await collectionApi.createCollection({ name, description });
+    const newCol = result.collection;
     setCollections((prev) => [newCol, ...prev]);
     return newCol;
-  };
+  }, []);
 
-  const addPaperToCollection = (paperId, collectionId) => {
-    setPapers((prev) =>
-      prev.map((p) => {
-        if (p.id === paperId) {
-          const currentCols = p.collections || [];
-          if (!currentCols.includes(collectionId)) {
-            return { ...p, collections: [...currentCols, collectionId] };
-          }
-        }
-        return p;
-      })
-    );
-  };
+  /**
+   * Adds a paper to a collection via POST /api/collections/:id/papers.
+   * Canonical argument order: (collectionId, paperId).
+   */
+  const addPaperToCollection = useCallback(async (collectionId, paperId) => {
+    const result = await collectionApi.addPaperToCollection(collectionId, paperId);
+    const updated = result.collection;
 
-  const removePaperFromCollection = (paperId, collectionId) => {
-    setPapers((prev) =>
-      prev.map((p) => {
-        if (p.id === paperId) {
-          return {
-            ...p,
-            collections: (p.collections || []).filter((c) => c !== collectionId),
-          };
-        }
-        return p;
-      })
+    setCollections((prev) =>
+      prev.map((col) => ((col.id || col._id) === (updated.id || updated._id) ? updated : col))
     );
-  };
+    return updated;
+  }, []);
+
+  /**
+   * Removes a paper from a collection via DELETE /api/collections/:id/papers/:paperId.
+   * Canonical argument order: (collectionId, paperId).
+   */
+  const removePaperFromCollection = useCallback(async (collectionId, paperId) => {
+    const result = await collectionApi.removePaperFromCollection(collectionId, paperId);
+    const updated = result.collection;
+
+    setCollections((prev) =>
+      prev.map((col) => ((col.id || col._id) === (updated.id || updated._id) ? updated : col))
+    );
+    return updated;
+  }, []);
 
   return (
     <LibraryContext.Provider
@@ -239,6 +275,9 @@ export function LibraryProvider({ children }) {
         deletePaper,
         checkDuplicateDoi,
         collections,
+        collectionsLoading,
+        collectionsError,
+        fetchCollections,
         createCollection,
         addPaperToCollection,
         removePaperFromCollection,
@@ -256,3 +295,4 @@ export function useLibrary() {
   }
   return context;
 }
+export { PaperApiError, CollectionApiError };

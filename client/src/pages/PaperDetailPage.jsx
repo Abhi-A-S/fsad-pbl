@@ -36,6 +36,10 @@ export default function PaperDetailPage() {
 
   // Collection modal state
   const [showCollectionModal, setShowCollectionModal] = useState(false);
+  const [togglingColId, setTogglingColId] = useState(null);
+  const [removingCollectionId, setRemovingCollectionId] = useState(null);
+  const [collectionModalError, setCollectionModalError] = useState(null);
+  const [collectionActionError, setCollectionActionError] = useState(null);
 
   // Fetch paper details directly from MongoDB backend (GET /api/papers/:id)
   useEffect(() => {
@@ -136,7 +140,44 @@ export default function PaperDetailPage() {
     );
   }
 
-  const assignedCollections = collections.filter((c) => paper.collections?.includes(c.id));
+  const assignedCollections = collections.filter(
+    (col) =>
+      Array.isArray(col.papers) &&
+      col.papers.some((p) => {
+        const pId = typeof p === 'string' ? p : p.id || p._id;
+        return pId === paper?.id;
+      })
+  );
+
+  const handleRemoveFromCollection = async (collectionId) => {
+    if (!paper) return;
+    setRemovingCollectionId(collectionId);
+    setCollectionActionError(null);
+    try {
+      await removePaperFromCollection(collectionId, paper.id);
+    } catch (err) {
+      setCollectionActionError(err.message || 'Failed to remove from collection');
+    } finally {
+      setRemovingCollectionId(null);
+    }
+  };
+
+  const handleToggleCollection = async (colId, isCurrentlyAssigned) => {
+    if (!paper) return;
+    setTogglingColId(colId);
+    setCollectionModalError(null);
+    try {
+      if (isCurrentlyAssigned) {
+        await removePaperFromCollection(colId, paper.id);
+      } else {
+        await addPaperToCollection(colId, paper.id);
+      }
+    } catch (err) {
+      setCollectionModalError(err.message || 'Failed to update collection assignment');
+    } finally {
+      setTogglingColId(null);
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -231,7 +272,10 @@ export default function PaperDetailPage() {
               Assigned Collections
             </h3>
             <button
-              onClick={() => setShowCollectionModal(true)}
+              onClick={() => {
+                setCollectionActionError(null);
+                setShowCollectionModal(true);
+              }}
               className="inline-flex items-center gap-1.5 text-xs text-stone-700 hover:text-stone-950 font-medium px-2.5 py-1 bg-stone-100 rounded-md hover:bg-stone-200 transition-colors"
             >
               <FolderPlus className="h-3.5 w-3.5" />
@@ -239,25 +283,51 @@ export default function PaperDetailPage() {
             </button>
           </div>
 
+          {collectionActionError && (
+            <div className="mb-3 p-2.5 bg-red-50 border border-red-200 rounded-md flex items-center justify-between text-xs text-red-700">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+                <span>{collectionActionError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCollectionActionError(null)}
+                className="text-red-500 hover:text-red-700 p-0.5"
+                title="Dismiss error"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-2">
             {assignedCollections.length === 0 ? (
               <span className="text-xs text-stone-400 italic">Not assigned to any collections yet.</span>
             ) : (
-              assignedCollections.map((col) => (
-                <div
-                  key={col.id}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50/80 text-amber-900 border border-amber-200/80 rounded-md text-xs font-medium"
-                >
-                  <span>{col.name}</span>
-                  <button
-                    onClick={() => removePaperFromCollection(paper.id, col.id)}
-                    className="hover:text-amber-700 p-0.5 rounded"
-                    title="Remove from collection"
+              assignedCollections.map((col) => {
+                const colId = col.id || col._id;
+                return (
+                  <div
+                    key={colId}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50/80 text-amber-900 border border-amber-200/80 rounded-md text-xs font-medium"
                   >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ))
+                    <span>{col.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFromCollection(colId)}
+                      disabled={removingCollectionId === colId}
+                      className="hover:text-amber-700 p-0.5 rounded transition-colors disabled:opacity-50"
+                      title="Remove from collection"
+                    >
+                      {removingCollectionId === colId ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <X className="h-3 w-3" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -358,6 +428,7 @@ export default function PaperDetailPage() {
                 Organize Collections
               </h3>
               <button
+                type="button"
                 onClick={() => setShowCollectionModal(false)}
                 className="text-stone-400 hover:text-stone-600"
               >
@@ -369,41 +440,71 @@ export default function PaperDetailPage() {
               Select the collections this publication belongs to:
             </p>
 
+            {collectionModalError && (
+              <div className="p-2.5 bg-red-50 text-red-700 rounded-md text-xs flex items-center gap-2 border border-red-200">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{collectionModalError}</span>
+              </div>
+            )}
+
             <div className="space-y-2 max-h-60 overflow-y-auto">
-              {collections.map((col) => {
-                const isAssigned = paper.collections?.includes(col.id);
-                return (
-                  <button
-                    key={col.id}
-                    onClick={() => {
-                      if (isAssigned) {
-                        removePaperFromCollection(paper.id, col.id);
-                      } else {
-                        addPaperToCollection(paper.id, col.id);
-                      }
-                    }}
-                    className={`w-full text-left p-3 rounded-lg border text-xs flex items-center justify-between transition-colors ${
-                      isAssigned
-                        ? 'border-amber-300 bg-amber-50/60 text-amber-900 font-medium'
-                        : 'border-stone-200 hover:bg-stone-50 text-stone-700'
-                    }`}
+              {collections.length === 0 ? (
+                <div className="p-6 text-center bg-stone-50 rounded-lg border border-dashed border-stone-200 text-xs text-stone-500">
+                  <p>No research collections created yet.</p>
+                  <Link
+                    to="/collections"
+                    className="mt-2 inline-block font-medium text-stone-900 underline hover:text-stone-700"
                   >
-                    <div>
-                      <span className="block font-medium">{col.name}</span>
-                      <span className="text-[11px] text-stone-400 block mt-0.5 line-clamp-1">
-                        {col.description}
-                      </span>
-                    </div>
-                    {isAssigned && <Check className="h-4 w-4 text-amber-800 shrink-0" />}
-                  </button>
-                );
-              })}
+                    Go to Collections to create one
+                  </Link>
+                </div>
+              ) : (
+                collections.map((col) => {
+                  const colId = col.id || col._id;
+                  const isAssigned =
+                    Array.isArray(col.papers) &&
+                    col.papers.some((p) => {
+                      const pId = typeof p === 'string' ? p : p.id || p._id;
+                      return pId === paper?.id;
+                    });
+                  const isToggling = togglingColId === colId;
+
+                  return (
+                    <button
+                      key={colId}
+                      type="button"
+                      disabled={isToggling}
+                      onClick={() => handleToggleCollection(colId, isAssigned)}
+                      className={`w-full text-left p-3 rounded-lg border text-xs flex items-center justify-between transition-colors disabled:opacity-60 ${
+                        isAssigned
+                          ? 'border-amber-300 bg-amber-50/60 text-amber-900 font-medium'
+                          : 'border-stone-200 hover:bg-stone-50 text-stone-700'
+                      }`}
+                    >
+                      <div>
+                        <span className="block font-medium">{col.name}</span>
+                        <span className="text-[11px] text-stone-400 block mt-0.5 line-clamp-1">
+                          {col.description || 'No description provided.'}
+                        </span>
+                      </div>
+                      <div className="shrink-0 ml-3">
+                        {isToggling ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-stone-400" />
+                        ) : isAssigned ? (
+                          <Check className="h-4 w-4 text-amber-800" />
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
 
             <div className="flex justify-end pt-3 border-t border-stone-100">
               <button
+                type="button"
                 onClick={() => setShowCollectionModal(false)}
-                className="px-4 py-2 bg-stone-900 text-stone-100 rounded-md text-xs font-medium"
+                className="px-4 py-2 bg-stone-900 text-stone-100 rounded-md text-xs font-medium hover:bg-stone-800 transition-colors"
               >
                 Done
               </button>
