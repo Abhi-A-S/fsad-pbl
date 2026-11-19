@@ -263,4 +263,138 @@ describe('ImportDoiPage (DOI Import & Manual Entry)', () => {
     expect(screen.getByText(/publication title is required\./i)).toBeInTheDocument();
     expect(paperApi.createPaper).not.toHaveBeenCalled();
   });
+
+  it('assigns paper to selected collection(s) upon saving', async () => {
+    const mockPaper = {
+      title: 'Attention Is All You Need',
+      authors: ['Ashish Vaswani'],
+      doi: '10.48550/arxiv.1706.03762',
+      year: 2017,
+    };
+    collectionApi.getCollections.mockResolvedValueOnce({
+      collections: [
+        { id: 'c1', name: 'NLP Transformers', papers: [] },
+        { id: 'c2', name: 'Deep Learning', papers: [] },
+      ],
+    });
+    paperApi.lookupDoi.mockResolvedValueOnce({ paper: mockPaper });
+    paperApi.createPaper.mockResolvedValueOnce({
+      paper: { id: 'p999', ...mockPaper },
+    });
+    collectionApi.addPaperToCollection.mockResolvedValue({
+      collection: { id: 'c1', name: 'NLP Transformers', papers: ['p999'] },
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<ImportDoiPage />);
+
+    const doiInput = screen.getByPlaceholderText('10.xxxx/xxxxx');
+    await user.clear(doiInput);
+    await user.type(doiInput, '10.48550/arxiv.1706.03762');
+    await user.click(screen.getByRole('button', { name: /lookup metadata/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('NLP Transformers')).toBeInTheDocument();
+    });
+
+    const colBtn = screen.getByRole('button', { name: /NLP Transformers/i });
+    await user.click(colBtn);
+
+    const saveBtn = screen.getByRole('button', { name: /confirm & save to library/i });
+    await user.click(saveBtn);
+
+    await waitFor(() => {
+      expect(paperApi.createPaper).toHaveBeenCalledTimes(1);
+      expect(collectionApi.addPaperToCollection).toHaveBeenCalledWith('c1', 'p999');
+    });
+  });
+
+  it('handles partial failure when assigning paper to collections and shows warning feedback', async () => {
+    const mockPaper = {
+      title: 'Attention Is All You Need',
+      authors: ['Ashish Vaswani'],
+      doi: '10.48550/arxiv.1706.03762',
+      year: 2017,
+    };
+    collectionApi.getCollections.mockResolvedValueOnce({
+      collections: [
+        { id: 'c1', name: 'NLP Transformers', papers: [] },
+        { id: 'c2', name: 'Deep Learning', papers: [] },
+      ],
+    });
+    paperApi.lookupDoi.mockResolvedValueOnce({ paper: mockPaper });
+    paperApi.createPaper.mockResolvedValueOnce({
+      paper: { id: 'p999', ...mockPaper },
+    });
+    collectionApi.addPaperToCollection.mockRejectedValueOnce(
+      new Error('Failed to add to collection')
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<ImportDoiPage />);
+
+    const doiInput = screen.getByPlaceholderText('10.xxxx/xxxxx');
+    await user.clear(doiInput);
+    await user.type(doiInput, '10.48550/arxiv.1706.03762');
+    await user.click(screen.getByRole('button', { name: /lookup metadata/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('NLP Transformers')).toBeInTheDocument();
+    });
+
+    const colBtn = screen.getByRole('button', { name: /NLP Transformers/i });
+    await user.click(colBtn);
+
+    const saveBtn = screen.getByRole('button', { name: /confirm & save to library/i });
+    await user.click(saveBtn);
+
+    await waitFor(() => {
+      expect(paperApi.createPaper).toHaveBeenCalledTimes(1);
+      expect(collectionApi.addPaperToCollection).toHaveBeenCalledWith('c1', 'p999');
+      expect(
+        screen.getByText(/paper saved to library, but failed to assign to 1 collection\(s\)/i)
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('imports paper without calling addPaperToCollection when no collection is selected', async () => {
+    const mockPaper = {
+      title: 'Paper Without Collection',
+      authors: ['Jane Doe'],
+      doi: '10.1234/no.collection',
+      year: 2022,
+    };
+    collectionApi.getCollections.mockResolvedValueOnce({
+      collections: [
+        { id: 'col-1', name: 'Machine Learning', papers: [] },
+      ],
+    });
+    paperApi.lookupDoi.mockResolvedValueOnce({ paper: mockPaper });
+    paperApi.createPaper.mockResolvedValueOnce({
+      paper: { id: 'p-no-col', ...mockPaper },
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<ImportDoiPage />);
+
+    const doiInput = screen.getByPlaceholderText('10.xxxx/xxxxx');
+    await user.clear(doiInput);
+    await user.type(doiInput, '10.1234/no.collection');
+    await user.click(screen.getByRole('button', { name: /lookup metadata/i }));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Paper Without Collection')).toBeInTheDocument();
+    });
+
+    // Do NOT click any collection button
+    const saveBtn = screen.getByRole('button', { name: /confirm & save to library/i });
+    await user.click(saveBtn);
+
+    await waitFor(() => {
+      expect(paperApi.createPaper).toHaveBeenCalledTimes(1);
+    });
+
+    expect(collectionApi.addPaperToCollection).not.toHaveBeenCalled();
+    expect(screen.getByText(/added to library! redirecting/i)).toBeInTheDocument();
+  });
 });

@@ -238,19 +238,25 @@ export default function LibraryPage() {
           </div>
         ) : (
           displayedPapers.map((paper) => {
-            const paperCollections = collections.filter((c) =>
-              paper.collections?.includes(c.id)
+            const paperId = paper.id || paper._id;
+            const paperCollections = collections.filter(
+              (c) =>
+                Array.isArray(c.papers) &&
+                c.papers.some((p) => {
+                  const pId = typeof p === 'string' ? p : p?.id || p?._id;
+                  return pId === paperId;
+                })
             );
 
             return (
               <article
-                key={paper.id}
+                key={paperId}
                 className="bg-white p-5 rounded-lg border border-stone-200/90 shadow-2xs hover:border-stone-300 hover:shadow-xs transition-all flex flex-col justify-between group"
               >
                 <div>
                   <div className="flex items-start justify-between gap-4">
                     <h2 className="font-serif text-lg font-semibold text-stone-900 group-hover:text-stone-700 leading-snug">
-                      <Link to={`/library/${paper.id}`} className="hover:underline">
+                      <Link to={`/library/${paperId}`} className="hover:underline">
                         {paper.title}
                       </Link>
                     </h2>
@@ -296,7 +302,7 @@ export default function LibraryPage() {
                     ))}
                     {paperCollections.map((col) => (
                       <span
-                        key={col.id}
+                        key={col.id || col._id}
                         className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200/60 rounded text-[11px] font-medium"
                       >
                         {col.name}

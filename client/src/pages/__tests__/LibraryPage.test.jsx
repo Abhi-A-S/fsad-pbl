@@ -48,7 +48,6 @@ const mockPapers = [
     venue: 'CVPR',
     abstract: 'Deeper neural networks are more difficult to train.',
     tags: ['deep-learning', 'computer-vision'],
-    collections: ['c1'],
   },
   {
     id: 'p2',
@@ -59,7 +58,6 @@ const mockPapers = [
     venue: 'NeurIPS',
     abstract: 'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.',
     tags: ['transformer', 'nlp'],
-    collections: [],
   },
 ];
 
@@ -271,5 +269,62 @@ describe('LibraryPage (Catalog & Search)', () => {
 
     expect(screen.getByText('Attention Is All You Need')).toBeInTheDocument();
     expect(screen.queryByText('Deep Residual Learning for Image Recognition')).not.toBeInTheDocument();
+  });
+
+  it('renders collection badges for papers referenced by collections (string IDs and populated objects) without paper.collections', async () => {
+    const rawPapers = [
+      {
+        id: 'paper-alpha',
+        title: 'AlphaFold: Accurate structure prediction',
+        authors: ['John Jumper', 'Demis Hassabis'],
+        year: 2021,
+        doi: '10.1038/s41586-021-03819-2',
+        tags: ['biology', 'deep-learning'],
+      },
+      {
+        id: 'paper-beta',
+        title: 'Generative Adversarial Nets',
+        authors: ['Ian Goodfellow'],
+        year: 2014,
+        doi: '10.48550/arxiv.1406.2661',
+        tags: ['gan', 'deep-learning'],
+      },
+    ];
+
+    const rawCollections = [
+      {
+        id: 'col-bio',
+        name: 'Computational Biology',
+        description: 'Structural biology papers',
+        // Referenced as string ID
+        papers: ['paper-alpha'],
+      },
+      {
+        id: 'col-gen',
+        name: 'Generative Models',
+        description: 'GANs and diffusion',
+        // Referenced as populated object
+        papers: [{ id: 'paper-beta', title: 'Generative Adversarial Nets' }],
+      },
+    ];
+
+    paperApi.getPapers.mockResolvedValueOnce({
+      papers: rawPapers,
+      pagination: { total: 2, page: 1, limit: 10, totalPages: 1 },
+    });
+    collectionApi.getCollections.mockResolvedValueOnce({
+      collections: rawCollections,
+    });
+
+    renderWithProviders(<LibraryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('AlphaFold: Accurate structure prediction')).toBeInTheDocument();
+      expect(screen.getByText('Generative Adversarial Nets')).toBeInTheDocument();
+    });
+
+    // Check that collection badges are displayed on their respective paper cards
+    expect(screen.getByText('Computational Biology')).toBeInTheDocument();
+    expect(screen.getByText('Generative Models')).toBeInTheDocument();
   });
 });

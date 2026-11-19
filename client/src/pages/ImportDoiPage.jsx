@@ -14,7 +14,7 @@ import { useLibrary } from '../context/LibraryContext.jsx';
 
 export default function ImportDoiPage() {
   const navigate = useNavigate();
-  const { lookupDoi, addPaper, checkDuplicateDoi, collections } = useLibrary();
+  const { lookupDoi, addPaper, checkDuplicateDoi, collections, addPaperToCollection } = useLibrary();
 
   // Mode: 'doi' for DOI metadata lookup, 'manual' for direct manual entry
   const [entryMode, setEntryMode] = useState('doi');
@@ -196,9 +196,28 @@ export default function ImportDoiPage() {
     setSaveLoading(true);
     try {
       const createdPaper = await addPaper(payload);
+      const paperId = createdPaper.id || createdPaper._id;
+
+      if (selectedCollections.length > 0) {
+        const results = await Promise.allSettled(
+          selectedCollections.map((colId) => addPaperToCollection(colId, paperId))
+        );
+        const failed = results.filter((r) => r.status === 'rejected');
+        if (failed.length > 0) {
+          setSaveError(
+            `Paper saved to library, but failed to assign to ${failed.length} collection(s). You can manage collections from the publication details page.`
+          );
+          setSaveLoading(false);
+          setTimeout(() => {
+            navigate(`/library/${paperId}`);
+          }, 2500);
+          return;
+        }
+      }
+
       setSavedSuccess(true);
       setTimeout(() => {
-        navigate(`/library/${createdPaper.id}`);
+        navigate(`/library/${paperId}`);
       }, 700);
     } catch (err) {
       if (err.status === 409) {
@@ -493,21 +512,22 @@ export default function ImportDoiPage() {
               />
             </div>
 
-            {/* Collection assignment on import (preserved UI) */}
+            {/* Collection assignment on import */}
             <div>
               <label className="block text-xs font-mono uppercase text-stone-500 font-semibold mb-1">
                 Assign to Initial Collection
               </label>
               <div className="flex flex-wrap gap-2">
                 {collections.map((col) => {
-                  const isChecked = selectedCollections.includes(col.id);
+                  const colId = col.id || col._id;
+                  const isChecked = selectedCollections.includes(colId);
                   return (
                     <button
                       type="button"
-                      key={col.id}
+                      key={colId}
                       onClick={() => {
                         setSelectedCollections((prev) =>
-                          isChecked ? prev.filter((id) => id !== col.id) : [...prev, col.id]
+                          isChecked ? prev.filter((id) => id !== colId) : [...prev, colId]
                         );
                       }}
                       className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${

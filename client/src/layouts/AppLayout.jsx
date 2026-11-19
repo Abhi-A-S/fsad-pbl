@@ -6,7 +6,6 @@ import {
   FolderKanban, 
   PlusCircle, 
   Search, 
-  Sparkles,
   Library,
   GraduationCap,
   LogOut,
@@ -143,11 +142,12 @@ export default function AppLayout({ children }) {
             </div>
             <div className="space-y-1">
               {collections.slice(0, 4).map((col) => {
-                const paperCount = papers.filter((p) => p.collections?.includes(col.id)).length;
+                const colId = col.id || col._id;
+                const paperCount = Array.isArray(col.papers) ? col.papers.length : 0;
                 return (
                   <Link
-                    key={col.id}
-                    to={`/collections/${col.id}`}
+                    key={colId}
+                    to={`/collections/${colId}`}
                     className="flex items-center justify-between px-3 py-1.5 text-xs text-stone-600 rounded-md hover:bg-stone-200/50 hover:text-stone-900 transition-colors"
                   >
                     <span className="truncate pr-2">• {col.name}</span>
@@ -205,19 +205,6 @@ export default function AppLayout({ children }) {
               {logoutError}
             </div>
           )}
-        </div>
-
-        {/* Mock Mode Indicator in Sidebar Footer */}
-        <div className="p-4 border-t border-stone-200 bg-stone-100/60">
-          <div className="flex items-start gap-2.5 p-2.5 rounded-md bg-stone-200/60 border border-stone-300/40 text-stone-700">
-            <Sparkles className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
-            <div className="text-xs">
-              <span className="font-medium text-stone-900 block">Frontend Mock Mode</span>
-              <span className="text-[11px] text-stone-500 leading-normal block mt-0.5">
-                Local in-memory state. Real Crossref and MongoDB connect in later phases.
-              </span>
-            </div>
-          </div>
         </div>
       </aside>
 
