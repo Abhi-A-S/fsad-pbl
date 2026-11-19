@@ -341,6 +341,27 @@ describe('Paper Model Test Suite', () => {
       assert.strictEqual(pA.doi, pB.doi);
       assert.notStrictEqual(pA.owner.toString(), pB.owner.toString());
     });
+
+    it('handles concurrent duplicate insertions by ensuring only one succeeds', async () => {
+      const paperData = {
+        title: 'Concurrent Insertion Test Paper',
+        authors: ['Concurrency Researcher'],
+        doi: '10.1234/concurrent.test.doi',
+        owner: userA,
+      };
+
+      const results = await Promise.allSettled([
+        Paper.create({ ...paperData }),
+        Paper.create({ ...paperData }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      assert.strictEqual(fulfilled.length, 1);
+      assert.strictEqual(rejected.length, 1);
+      assert.strictEqual(rejected[0].reason.code, 11000);
+    });
   });
 
   describe('Authors Validation', () => {

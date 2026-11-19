@@ -110,8 +110,8 @@ export function LibraryProvider({ children }) {
   // Automatically fetch papers and collections on login; clear on logout
   useEffect(() => {
     if (user) {
-      fetchPapers({ page: 1, limit: 10 });
-      fetchCollections();
+      fetchPapers({ page: 1, limit: 10 }).catch(() => {});
+      fetchCollections().catch(() => {});
     } else {
       setPapers([]);
       setPagination({ page: 1, limit: 10, total: 0, totalPages: 0 });

@@ -66,9 +66,9 @@ export default function CollectionsPage() {
     }
   };
 
-  const selectedCollection = collections.find(
-    (c) => c.id === activeColId || c._id === activeColId
-  );
+  const selectedCollection = activeColId
+    ? collections.find((c) => c.id === activeColId || c._id === activeColId)
+    : null;
 
   const handleRemovePaper = async (paperId) => {
     if (!selectedCollection) return;
@@ -163,7 +163,8 @@ export default function CollectionsPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {collections.map((col) => {
             const paperCount = Array.isArray(col.papers) ? col.papers.length : 0;
-            const isActive = activeColId === col.id || activeColId === col._id;
+            const isActive =
+              Boolean(activeColId) && (activeColId === col.id || activeColId === col._id);
 
             return (
               <div
