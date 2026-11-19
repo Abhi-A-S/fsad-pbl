@@ -5,6 +5,7 @@ import {
   searchPapers,
   createPaper,
   listPapers,
+  getPaperEnrichmentSuggestions,
   getPaperById,
   updatePaper,
   deletePaper,
@@ -32,6 +33,13 @@ router.get('/search', authenticate, searchPapers);
  * @access  Private (Authenticated users only)
  */
 router.get('/', authenticate, listPapers);
+
+/**
+ * @route   GET /api/papers/:id/enrich-suggestions
+ * @desc    Get OpenAlex metadata enrichment suggestions for an existing paper
+ * @access  Private (Authenticated users only)
+ */
+router.get('/:id/enrich-suggestions', authenticate, getPaperEnrichmentSuggestions);
 
 /**
  * @route   GET /api/papers/:id

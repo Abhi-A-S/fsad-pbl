@@ -10,9 +10,33 @@ import {
   Loader2,
   AlertCircle,
   Trash2,
+  Sparkles,
+  RefreshCw,
+  HelpCircle,
 } from 'lucide-react';
 import { useLibrary } from '../context/LibraryContext.jsx';
 import { paperApi } from '../services/paperApi.js';
+
+const FIELD_LABELS = {
+  abstract: 'Abstract',
+  venue: 'Venue / Journal',
+  year: 'Publication Year',
+  publicationDate: 'Publication Date',
+  publisher: 'Publisher',
+  url: 'Landing URL',
+  doi: 'DOI',
+  authors: 'Authors',
+};
+
+function formatFieldValue(val) {
+  if (val === null || val === undefined || val === '') {
+    return <span className="text-stone-400 italic font-sans">(Not recorded)</span>;
+  }
+  if (Array.isArray(val)) {
+    return val.join(', ');
+  }
+  return String(val);
+}
 
 export default function PaperDetailPage() {
   const { id } = useParams();
@@ -40,6 +64,116 @@ export default function PaperDetailPage() {
   const [removingCollectionId, setRemovingCollectionId] = useState(null);
   const [collectionModalError, setCollectionModalError] = useState(null);
   const [collectionActionError, setCollectionActionError] = useState(null);
+
+  // Metadata enrichment state
+  const [enrichOpen, setEnrichOpen] = useState(false);
+  const [enrichLoading, setEnrichLoading] = useState(false);
+  const [enrichStatus, setEnrichStatus] = useState(null); // 'ready' | 'ambiguous' | 'not_found' | 'error' | null
+  const [enrichError, setEnrichError] = useState(null);
+  const [enrichSuccess, setEnrichSuccess] = useState(null);
+  const [enrichMessage, setEnrichMessage] = useState(null);
+  const [matchedWork, setMatchedWork] = useState(null);
+  const [suggestions, setSuggestions] = useState([]);
+  const [candidates, setCandidates] = useState([]);
+  const [selectedFields, setSelectedFields] = useState({});
+  const [isApplying, setIsApplying] = useState(false);
+  const [applyError, setApplyError] = useState(null);
+
+  // Request enrichment suggestions from OpenAlex (GET /api/papers/:id/enrich-suggestions)
+  const handleStartEnrichment = async (openAlexId = null) => {
+    if (!paper?.id || enrichLoading || isApplying) return;
+
+    setEnrichOpen(true);
+    setEnrichLoading(true);
+    setEnrichError(null);
+    setEnrichSuccess(null);
+    setEnrichMessage(null);
+    setApplyError(null);
+
+    try {
+      const data = await paperApi.getEnrichSuggestions(paper.id, openAlexId);
+      setEnrichStatus(data.status);
+
+      if (data.status === 'ready') {
+        setMatchedWork(data.matchedWork || null);
+        const suggList = Array.isArray(data.suggestions) ? data.suggestions : [];
+        setSuggestions(suggList);
+
+        // Pre-select 'add' items; strictly leave 'update' unchecked
+        // (Ensures destructive overwrites and author alterations require explicit opt-in)
+        const initialSelection = {};
+        suggList.forEach((s) => {
+          initialSelection[s.field] = s.type === 'add';
+        });
+        setSelectedFields(initialSelection);
+      } else if (data.status === 'ambiguous') {
+        setCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      } else if (data.status === 'not_found') {
+        setEnrichMessage(data.message || 'No matching publication found in OpenAlex.');
+      }
+    } catch (err) {
+      setEnrichStatus('error');
+      setEnrichError(err.message || 'Failed to retrieve enrichment suggestions from OpenAlex.');
+    } finally {
+      setEnrichLoading(false);
+    }
+  };
+
+  const handleSelectCandidate = (openAlexId) => {
+    handleStartEnrichment(openAlexId);
+  };
+
+  const handleToggleField = (field) => {
+    setSelectedFields((prev) => ({
+      ...prev,
+      [field]: !prev[field],
+    }));
+  };
+
+  const handleApplyChanges = async () => {
+    if (!paper?.id || isApplying) return;
+
+    const fieldsToApply = suggestions.filter((s) => selectedFields[s.field]);
+    if (fieldsToApply.length === 0) return;
+
+    setIsApplying(true);
+    setApplyError(null);
+
+    const updatePayload = {};
+    for (const s of fieldsToApply) {
+      updatePayload[s.field] = s.suggestedValue;
+    }
+
+    try {
+      const res = await paperApi.updatePaper(paper.id, updatePayload);
+      if (res?.paper) {
+        setPaper(res.paper);
+      }
+      setEnrichSuccess('Metadata successfully enriched and saved to your library.');
+      setEnrichOpen(false);
+      setEnrichStatus(null);
+      setSuggestions([]);
+      setMatchedWork(null);
+      setCandidates([]);
+      setSelectedFields({});
+    } catch (err) {
+      setApplyError(err.message || 'Failed to apply metadata changes.');
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
+  const handleCloseEnrichment = () => {
+    setEnrichOpen(false);
+    setEnrichStatus(null);
+    setEnrichError(null);
+    setEnrichMessage(null);
+    setMatchedWork(null);
+    setSuggestions([]);
+    setCandidates([]);
+    setSelectedFields({});
+    setApplyError(null);
+  };
 
   // Fetch paper details directly from MongoDB backend (GET /api/papers/:id)
   useEffect(() => {
@@ -236,6 +370,312 @@ export default function PaperDetailPage() {
           </div>
         </div>
 
+        {/* Enrichment Success Banner */}
+        {enrichSuccess && (
+          <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Check className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span>{enrichSuccess}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEnrichSuccess(null)}
+              className="text-emerald-700 hover:text-emerald-950 p-0.5"
+              title="Dismiss notification"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Inline Metadata Enrichment Panel */}
+        {enrichOpen && (
+          <section aria-label="Metadata Enrichment Panel" className="p-5 bg-stone-50 rounded-xl border border-stone-200/90 space-y-4">
+            <div className="flex items-center justify-between border-b border-stone-200/60 pb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-amber-600" />
+                <h2 className="text-xs font-mono uppercase tracking-wider text-stone-700 font-semibold">
+                  OpenAlex Metadata Enrichment
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEnrichment}
+                disabled={isApplying}
+                className="text-stone-400 hover:text-stone-600 p-1 rounded"
+                title="Close enrichment panel"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Loading State */}
+            {enrichLoading && (
+              <div className="py-8 text-center space-y-2">
+                <Loader2 className="h-6 w-6 text-amber-600 animate-spin mx-auto" />
+                <p className="text-xs font-medium text-stone-700">Connecting to OpenAlex...</p>
+                <p className="text-[11px] text-stone-400">Searching and diffing publication metadata</p>
+              </div>
+            )}
+
+            {/* Error State */}
+            {!enrichLoading && enrichStatus === 'error' && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-red-900">Unable to retrieve enrichment suggestions</p>
+                    <p className="text-xs text-red-700">{enrichError}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleStartEnrichment()}
+                    className="px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-stone-100 rounded text-xs font-medium transition-colors"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCloseEnrichment}
+                    className="px-3 py-1.5 border border-stone-300 hover:bg-stone-100 text-stone-700 rounded text-xs font-medium transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Not Found State */}
+            {!enrichLoading && enrichStatus === 'not_found' && (
+              <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-lg space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <HelpCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-amber-900">No Matching Publication Found</p>
+                    <p className="text-xs text-amber-800 leading-relaxed">
+                      {enrichMessage || 'OpenAlex did not return any records matching this paper’s title or DOI.'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleStartEnrichment()}
+                    className="px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-stone-100 rounded text-xs font-medium transition-colors"
+                  >
+                    Retry Search
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCloseEnrichment}
+                    className="px-3 py-1.5 border border-stone-300 hover:bg-stone-100 text-stone-700 rounded text-xs font-medium transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Ambiguous Candidates State */}
+            {!enrichLoading && enrichStatus === 'ambiguous' && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <h3 className="text-xs font-semibold text-stone-900">
+                    Multiple Matching Publications Found
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    Please select the OpenAlex publication that corresponds to your paper to review its suggestions:
+                  </p>
+                </div>
+
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {candidates.map((cand) => (
+                    <div
+                      key={cand.id || cand.openAlexId}
+                      className="p-3 bg-white rounded-lg border border-stone-200 hover:border-amber-300 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1 flex-1">
+                        <h4 className="text-xs font-semibold text-stone-900 leading-snug">
+                          {cand.title}
+                        </h4>
+                        <p className="text-xs text-stone-600">
+                          {Array.isArray(cand.authors) ? cand.authors.join(', ') : cand.authors || 'Unknown authors'}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-400 font-mono">
+                          {cand.year && <span>{cand.year}</span>}
+                          {cand.venue && <span>• {cand.venue}</span>}
+                          {cand.openAlexId && <span>• {cand.openAlexId}</span>}
+                          {cand.doi && <span>• DOI: {cand.doi}</span>}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCandidate(cand.openAlexId)}
+                        className="shrink-0 self-start md:self-center px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-stone-100 rounded text-xs font-medium transition-colors"
+                      >
+                        Select Candidate
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Ready Suggestions State */}
+            {!enrichLoading && enrichStatus === 'ready' && (
+              <div className="space-y-4">
+                {/* Matched Work Summary */}
+                {matchedWork && (
+                  <div className="p-3 bg-white rounded-lg border border-stone-200/80 text-xs space-y-1">
+                    <div className="flex items-center justify-between text-stone-500 text-[11px] font-mono">
+                      <span>Matched Work: {matchedWork.openAlexId || matchedWork.id}</span>
+                      {matchedWork.year && <span>{matchedWork.year}</span>}
+                    </div>
+                    <div className="font-medium text-stone-900">{matchedWork.title}</div>
+                    {matchedWork.venue && <div className="text-stone-500 italic text-[11px]">{matchedWork.venue}</div>}
+                  </div>
+                )}
+
+                {suggestions.length === 0 ? (
+                  <div className="p-4 bg-white rounded-lg border border-stone-200 text-center space-y-2">
+                    <p className="text-xs font-medium text-stone-800">
+                      Your paper already contains all available metadata matching this publication.
+                    </p>
+                    <p className="text-xs text-stone-500">No new fields or alternative values to suggest.</p>
+                    <button
+                      type="button"
+                      onClick={handleCloseEnrichment}
+                      className="mt-2 px-3 py-1.5 border border-stone-200 hover:bg-stone-50 rounded text-xs font-medium text-stone-700"
+                    >
+                      Done
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-semibold text-stone-900">
+                          Proposed Metadata Changes ({suggestions.length})
+                        </h3>
+                        <span className="text-[11px] font-mono text-stone-400">
+                          {Object.values(selectedFields).filter(Boolean).length} selected
+                        </span>
+                      </div>
+                      <p className="text-xs text-stone-500">
+                        Select which fields to apply. Existing metadata is never overwritten without your explicit selection.
+                      </p>
+                    </div>
+
+                    {applyError && (
+                      <div className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+                        <span>{applyError}</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-2.5">
+                      {suggestions.map((s) => {
+                        const isSelected = Boolean(selectedFields[s.field]);
+                        const isAdd = s.type === 'add';
+
+                        return (
+                          <label
+                            key={s.field}
+                            htmlFor={`enrich-field-${s.field}`}
+                            className={`block p-3.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                              isSelected
+                                ? 'bg-white border-amber-400 shadow-xs ring-1 ring-amber-300'
+                                : 'bg-white/70 border-stone-200 hover:border-stone-300'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                id={`enrich-field-${s.field}`}
+                                checked={isSelected}
+                                onChange={() => handleToggleField(s.field)}
+                                disabled={isApplying}
+                                className="mt-1 h-4 w-4 rounded text-amber-600 focus:ring-amber-500 border-stone-300 cursor-pointer"
+                              />
+                              <div className="flex-1 space-y-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-stone-900">
+                                    {FIELD_LABELS[s.field] || s.field}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+                                      isAdd
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                    }`}
+                                  >
+                                    {isAdd ? 'New Addition' : 'Update / Alternative'}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1 border-t border-stone-100 text-xs">
+                                  <div className="space-y-0.5">
+                                    <span className="text-[10px] uppercase font-mono text-stone-400 font-semibold block">
+                                      Current Value
+                                    </span>
+                                    <div className="text-stone-600">
+                                      {formatFieldValue(s.currentValue)}
+                                    </div>
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <span className="text-[10px] uppercase font-mono text-stone-400 font-semibold block">
+                                      Proposed Value
+                                    </span>
+                                    <div className="text-stone-900 font-medium">
+                                      {formatFieldValue(s.suggestedValue)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-stone-200/70">
+                      <button
+                        type="button"
+                        onClick={handleCloseEnrichment}
+                        disabled={isApplying}
+                        className="px-3.5 py-1.5 border border-stone-200 bg-white hover:bg-stone-50 rounded-md text-xs font-medium text-stone-700 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleApplyChanges}
+                        disabled={isApplying || Object.values(selectedFields).filter(Boolean).length === 0}
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-stone-900 hover:bg-stone-800 text-stone-100 rounded-md text-xs font-medium transition-colors disabled:opacity-50"
+                      >
+                        {isApplying ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <span>Applying Changes...</span>
+                          </>
+                        ) : (
+                          <span>
+                            Apply {Object.values(selectedFields).filter(Boolean).length} Selected Change
+                            {Object.values(selectedFields).filter(Boolean).length === 1 ? '' : 's'}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* Abstract */}
         <div className="pt-4 border-t border-stone-100">
           <h2 className="text-xs font-mono uppercase tracking-wider text-stone-400 font-semibold mb-2">
@@ -339,6 +779,20 @@ export default function PaperDetailPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => handleStartEnrichment()}
+              disabled={enrichLoading || isApplying}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-stone-700 hover:text-stone-900 border border-stone-200 hover:border-amber-300 hover:bg-amber-50/40 rounded-md text-xs font-medium transition-colors disabled:opacity-50"
+            >
+              {enrichLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5 text-amber-600" />
+              )}
+              <span>Enrich Metadata</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setShowDeleteConfirm(true)}

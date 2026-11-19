@@ -365,4 +365,186 @@ describe('GET /api/papers/lookup Integration Tests', () => {
       assert.ok(body.error?.message?.includes('malformed'));
     });
   });
+
+  describe('Automatic OpenAlex Enrichment', () => {
+    it('enriches missing abstract from OpenAlex and returns enrichment metadata', async () => {
+      const mockCrossref = {
+        status: 'ok',
+        message: {
+          title: ['Crossref Title Without Abstract'],
+          author: [{ given: 'Alice', family: 'Smith' }],
+          abstract: '', // Empty in Crossref
+          DOI: '10.1038/sample.doi',
+          issued: { 'date-parts': [[2021, 3, 1]] },
+          'container-title': ['Nature'],
+          publisher: 'Nature Publishing Group',
+        },
+      };
+
+      const mockOpenAlex = {
+        id: 'https://openalex.org/W999',
+        title: 'Crossref Title Without Abstract',
+        abstract_inverted_index: {
+          Enriched: [0],
+          abstract: [1],
+          content: [2],
+        },
+      };
+
+      globalThis.fetch = async (url, options) => {
+        if (url.includes('api.crossref.org')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => mockCrossref,
+          };
+        }
+        if (url.includes('api.openalex.org')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => mockOpenAlex,
+          };
+        }
+        return originalFetch(url, options);
+      };
+
+      const res = await fetch(`${baseUrl}/api/papers/lookup?doi=10.1038/sample.doi`, {
+        headers: { Cookie: authCookie },
+      });
+      assert.strictEqual(res.status, 200);
+
+      const body = await res.json();
+      assert.ok(body.paper);
+      assert.strictEqual(body.paper.title, 'Crossref Title Without Abstract');
+      assert.deepStrictEqual(body.paper.authors, ['Alice Smith']);
+      assert.strictEqual(body.paper.abstract, 'Enriched abstract content');
+      assert.ok(body.enrichment);
+      assert.strictEqual(body.enrichment.provider, 'openalex');
+      assert.strictEqual(body.enrichment.status, 'enriched');
+      assert.deepStrictEqual(body.enrichment.supplementedFields, ['abstract']);
+    });
+
+    it('returns 200 with pure Crossref data when OpenAlex returns 404', async () => {
+      const mockCrossref = {
+        status: 'ok',
+        message: {
+          title: ['Crossref Only Article'],
+          author: [{ given: 'Bob', family: 'Jones' }],
+          abstract: '',
+          DOI: '10.1038/sample.404',
+        },
+      };
+
+      globalThis.fetch = async (url, options) => {
+        if (url.includes('api.crossref.org')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => mockCrossref,
+          };
+        }
+        if (url.includes('api.openalex.org')) {
+          return {
+            ok: false,
+            status: 404,
+          };
+        }
+        return originalFetch(url, options);
+      };
+
+      const res = await fetch(`${baseUrl}/api/papers/lookup?doi=10.1038/sample.404`, {
+        headers: { Cookie: authCookie },
+      });
+      assert.strictEqual(res.status, 200);
+
+      const body = await res.json();
+      assert.strictEqual(body.paper.title, 'Crossref Only Article');
+      assert.strictEqual(body.paper.abstract, '');
+      assert.ok(body.enrichment);
+      assert.strictEqual(body.enrichment.status, 'unavailable');
+      assert.deepStrictEqual(body.enrichment.supplementedFields, []);
+    });
+
+    it('returns 200 with pure Crossref data when OpenAlex times out', async () => {
+      const mockCrossref = {
+        status: 'ok',
+        message: {
+          title: ['Crossref Only Article Timeout'],
+          author: [{ given: 'Charlie', family: 'Brown' }],
+          abstract: '',
+          DOI: '10.1038/sample.timeout',
+        },
+      };
+
+      globalThis.fetch = async (url, options) => {
+        if (url.includes('api.crossref.org')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => mockCrossref,
+          };
+        }
+        if (url.includes('api.openalex.org')) {
+          const timeoutErr = new Error('The operation was aborted');
+          timeoutErr.name = 'TimeoutError';
+          throw timeoutErr;
+        }
+        return originalFetch(url, options);
+      };
+
+      const res = await fetch(`${baseUrl}/api/papers/lookup?doi=10.1038/sample.timeout`, {
+        headers: { Cookie: authCookie },
+      });
+      assert.strictEqual(res.status, 200);
+
+      const body = await res.json();
+      assert.strictEqual(body.paper.title, 'Crossref Only Article Timeout');
+      assert.strictEqual(body.enrichment.status, 'unavailable');
+    });
+
+    it('returns 200 with skipped enrichment when Crossref has complete metadata', async () => {
+      let openAlexCalled = false;
+      const mockCrossref = {
+        status: 'ok',
+        message: {
+          title: ['Complete Crossref Article'],
+          author: [{ given: 'Dana', family: 'Scully' }],
+          abstract: 'Full abstract already present',
+          DOI: '10.1038/sample.complete',
+          issued: { 'date-parts': [[2023, 1, 1]] },
+          'container-title': ['FBI Gazette'],
+          publisher: 'US Government',
+          URL: 'https://custom-url.gov/article',
+        },
+      };
+
+      globalThis.fetch = async (url, options) => {
+        if (url.includes('api.crossref.org')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => mockCrossref,
+          };
+        }
+        if (url.includes('api.openalex.org')) {
+          openAlexCalled = true;
+          return { ok: true, status: 200, json: async () => ({}) };
+        }
+        return originalFetch(url, options);
+      };
+
+      const res = await fetch(`${baseUrl}/api/papers/lookup?doi=10.1038/sample.complete`, {
+        headers: { Cookie: authCookie },
+      });
+      assert.strictEqual(res.status, 200);
+
+      const body = await res.json();
+      assert.strictEqual(openAlexCalled, false);
+      assert.strictEqual(body.paper.title, 'Complete Crossref Article');
+      assert.strictEqual(body.paper.abstract, 'Full abstract already present');
+      assert.strictEqual(body.enrichment.status, 'skipped');
+      assert.deepStrictEqual(body.enrichment.supplementedFields, []);
+    });
+  });
 });

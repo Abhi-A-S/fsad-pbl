@@ -53,7 +53,7 @@ ResearchForge is a full-stack web application designed for researchers, students
 | **API Server** | Express.js | 5.x | RESTful routing, middleware, and request handling |
 | **Database** | MongoDB | 7.x / 8.x | Document-oriented database for scholarly records |
 | **ODM** | Mongoose | 9.x | Schemas, validation, indexes, and middleware |
-| **Metadata Source**| Crossref REST API | v1 | Upstream bibliographic DOI resolution |
+| **Metadata Sources**| Crossref & OpenAlex REST APIs | v1 | Primary Crossref resolution with OpenAlex secondary enrichment |
 | **Testing** | Node Test Runner / Vitest | Built-in / 5.x | Comprehensive backend and frontend test suites |
 
 ---
@@ -267,7 +267,8 @@ npm run build
 ### Publications (`/api/papers`)
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :---: |
-| `GET` | `/api/papers/lookup` | Resolve metadata from Crossref by DOI (`?doi=...`) | Yes |
+| `GET` | `/api/papers/lookup` | Resolve metadata by DOI via Crossref with OpenAlex automated enrichment (`?doi=...`) | Yes |
+| `GET` | `/api/papers/:id/enrich-suggestions` | Retrieve OpenAlex metadata enrichment suggestions for an existing paper (`?openAlexId=...`) | Yes |
 | `POST` | `/api/papers` | Save a new publication record to user library | Yes |
 | `GET` | `/api/papers` | List user publications with database pagination | Yes |
 | `GET` | `/api/papers/search` | Search user library by keyword with pagination | Yes |
@@ -292,9 +293,10 @@ npm run build
 
 ## 8. Current Scope & Future Roadmap
 
-### Current Limitations (MVP Scope)
-- **Single-User Libraries**: Research libraries and collections are strictly isolated to the owning user; collaborative team sharing is not yet active.
-- **Bibliographic Ingestion**: Ingestion currently handles Crossref DOI metadata and manual entry; PDF parsing and document attachment are not yet implemented.
+### Current Scope (Extended MVP)
+- **Single-User Libraries**: Research libraries and collections are strictly isolated to the owning user; collaborative team sharing is deferred to future phases.
+- **Bibliographic Ingestion & Enrichment**: Supports primary Crossref DOI metadata lookup, automatic secondary OpenAlex enrichment for missing fields (abstracts, venue, dates), manual entry without DOI, and manual inline OpenAlex enrichment on existing library papers with candidate disambiguation and non-destructive diff reviews.
+- **Document Management**: Document attachments and PDF viewing are planned for future phases.
 - **External Citations**: Citation graphs and reference tracking are pending sidecar microservices.
 
 ### Future Roadmap

@@ -158,6 +158,20 @@ export const paperApi = {
   },
 
   /**
+   * Retrieve metadata enrichment suggestions from OpenAlex for an existing paper.
+   * GET /api/papers/:id/enrich-suggestions(?openAlexId=...)
+   * @param {string} id - Paper MongoDB ObjectId
+   * @param {string} [openAlexId] - Optional user-selected OpenAlex ID for candidate resolution
+   * @returns {Promise<{ paperId: string, status: string, matchedWork?: any, suggestions?: any[], candidates?: any[], message?: string }>}
+   */
+  async getEnrichSuggestions(id, openAlexId) {
+    const query = openAlexId ? `?openAlexId=${encodeURIComponent(openAlexId)}` : '';
+    return request(`/api/papers/${encodeURIComponent(id)}/enrich-suggestions${query}`, {
+      method: 'GET',
+    });
+  },
+
+  /**
    * Retrieve a single paper by its MongoDB ObjectId.
    * GET /api/papers/:id
    * @param {string} id

@@ -1,10 +1,16 @@
 import mongoose from 'mongoose';
 import { fetchCrossrefMetadata, CrossrefError } from '../services/crossrefService.js';
+import { OpenAlexError } from '../services/openAlexService.js';
+import {
+  enrichDoiLookup,
+  getPaperEnrichmentSuggestions as getPaperEnrichmentSuggestionsService,
+} from '../services/metadataEnrichmentService.js';
 import { Paper } from '../models/Paper.js';
 import { Collection } from '../models/Collection.js';
 
 /**
- * Controller to look up paper metadata from Crossref by DOI.
+ * Controller to look up paper metadata by DOI from Crossref (primary)
+ * and automatically enrich missing metadata with OpenAlex (secondary).
  * This is a read-only metadata resolution endpoint; no Paper documents are saved.
  *
  * GET /api/papers/lookup?doi=...
@@ -21,10 +27,11 @@ export async function lookupPaperByDoi(req, res, next) {
       });
     }
 
-    const paperMetadata = await fetchCrossrefMetadata(doi);
+    const { paper, enrichment } = await enrichDoiLookup(doi);
 
     return res.status(200).json({
-      paper: paperMetadata,
+      paper,
+      enrichment,
     });
   } catch (error) {
     if (error instanceof CrossrefError) {
@@ -109,6 +116,55 @@ export async function listPapers(req, res, next) {
       },
     });
   } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Controller to get OpenAlex metadata enrichment suggestions for an existing paper.
+ * Read-only operation: Paper document is never modified in MongoDB.
+ *
+ * GET /api/papers/:id/enrich-suggestions
+ */
+export async function getPaperEnrichmentSuggestions(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    if (!id || typeof id !== 'string' || !/^[0-9a-fA-F]{24}$/.test(id) || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        error: {
+          message: 'Invalid paper ID format',
+        },
+      });
+    }
+
+    const paper = await Paper.findOne({
+      _id: id,
+      owner: req.user._id,
+    });
+
+    if (!paper) {
+      return res.status(404).json({
+        error: {
+          message: 'Paper not found',
+        },
+      });
+    }
+
+    const { openAlexId } = req.query;
+
+    const result = await getPaperEnrichmentSuggestionsService(paper, { openAlexId });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error instanceof OpenAlexError) {
+      return res.status(error.statusCode).json({
+        error: {
+          message: error.message,
+        },
+      });
+    }
+
     next(error);
   }
 }
